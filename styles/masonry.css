@@ -1,0 +1,25 @@
+.masonry-container {
+  position: relative;
+  width: 100%;
+}
+
+.masonry-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  opacity: 0;
+  /* transition is set inline by Masonry (transform + opacity) */
+}
+
+.masonry-item--visible {
+  opacity: 1;
+}
+
+.masonry-sentinel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+  visibility: hidden;
+}
