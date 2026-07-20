@@ -1,458 +1,222 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Masonry — Demo</title>
-  <link rel="stylesheet" href="styles/masonry.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Interactive Masonry layout demo">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>▦</text></svg>">
+  <title>Masonry — live demo</title>
+  <link rel="stylesheet" href="./styles/masonry.css">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background: #0a0a0a;
-      color: #e0e0e0;
-      font-family: system-ui, -apple-system, sans-serif;
-      min-height: 100vh;
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: #080a0f;
+      color: #f4f6fb;
     }
-
-    /* ── Controls panel ── */
-    .panel {
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    .toolbar {
       position: sticky;
+      z-index: 10;
       top: 0;
-      z-index: 100;
-      background: #111;
-      border-bottom: 1px solid #2a2a2a;
-      padding: 1rem 1.5rem;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 0.75rem;
+      gap: .7rem;
+      padding: .9rem max(1rem, calc((100vw - 1220px) / 2));
+      border-bottom: 1px solid #242936;
+      background: rgba(8, 10, 15, .86);
+      backdrop-filter: blur(18px);
     }
-
-    .panel__title {
-      font-size: 1.1rem;
-      font-weight: 600;
-      margin-right: 1rem;
-      white-space: nowrap;
-    }
-
-    .btn {
-      background: #242424;
-      border: 1px solid #333;
-      padding: 0.4rem 0.85rem;
-      border-radius: 6px;
-      color: #e0e0e0;
-      cursor: pointer;
-      font-size: 0.8rem;
-      transition: background 0.15s;
-      white-space: nowrap;
-    }
-    .btn:hover { background: #333; }
-    .btn--accent { border-color: #5d72de; color: #8b9cf7; }
-    .btn--danger { border-color: #f85782; color: #f85782; }
-    .btn--warn   { border-color: #ffbf00; color: #ffbf00; }
-
-    .select-group {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.8rem;
-      color: #888;
-    }
-    .select-group select {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      color: #e0e0e0;
-      padding: 0.3rem 0.5rem;
-      border-radius: 4px;
-      font-size: 0.8rem;
-    }
-
-    .slider-group {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.8rem;
-      color: #888;
-    }
-    .slider-group input[type="range"] {
-      width: 100px;
-      accent-color: #5d72de;
-    }
-    .slider-group .slider-val {
-      min-width: 32px;
-      color: #ccc;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .log {
-      flex-basis: 100%;
-      font-size: 0.75rem;
-      color: #666;
-      margin-top: 0.25rem;
-      height: 1.2em;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-    }
-
-    /* ── Grid area ── */
-    #grid {
-      padding: 1.5rem;
-    }
-
-    /* ── Card styles ── */
-    .card {
+    .brand { margin-right: auto; }
+    h1 { margin: 0; font-size: 1.15rem; }
+    .status { color: #8f9ab1; font-size: .76rem; }
+    button, select {
+      min-height: 38px;
+      border: 1px solid #343c51;
       border-radius: 10px;
+      padding: 0 .8rem;
+      color: #edf2ff;
+      background: #151a25;
+      font: inherit;
+      font-size: .82rem;
+    }
+    button { cursor: pointer; }
+    button:hover, select:hover { background: #222a3a; }
+    button.primary {
+      border-color: #768cff;
+      background: #5c70df;
+    }
+    main {
+      width: min(100% - 2rem, 1220px);
+      margin: 2rem auto 8rem;
+    }
+    .intro {
+      max-width: 720px;
+      margin-bottom: 1.6rem;
+      color: #aab3c7;
+      line-height: 1.65;
+    }
+    .card {
       overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .08);
+      border-radius: 18px;
+      background: linear-gradient(145deg, #181f30, #10141f);
+      box-shadow: 0 16px 55px rgba(0, 0, 0, .22);
       cursor: pointer;
-      transition: box-shadow 0.2s;
     }
-    .card:hover {
-      box-shadow: 0 4px 24px rgba(255,255,255,.06);
-    }
-
-    .card__body {
-      padding: 0.85rem;
-    }
-    .card__title {
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin-bottom: 0.4rem;
-    }
-    .card__text {
-      font-size: 0.75rem;
-      line-height: 1.45;
-      color: #bbb;
-    }
-    .card__tag {
-      display: inline-block;
-      margin-top: 0.5rem;
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
-      font-size: 0.65rem;
-      background: rgba(255,255,255,.08);
-      color: #999;
-    }
-
+    .card:hover { border-color: rgba(143, 165, 255, .55); }
     .card img {
-      width: 100%;
       display: block;
+      width: 100%;
+      height: auto;
+      background: #131824;
     }
-
-    /* ── Highlight first item via data attribute ── */
-    [data-masonry-index="0"] .card {
-      box-shadow: 0 0 0 2px #5d72de;
+    .card__body { padding: 1rem; }
+    .card__eyebrow {
+      color: #8fa5ff;
+      font-size: .7rem;
+      font-weight: 800;
+      letter-spacing: .11em;
+      text-transform: uppercase;
     }
+    .card h2 { margin: .4rem 0 .5rem; font-size: 1rem; }
+    .card p { margin: 0; color: #9fa9bd; font-size: .84rem; line-height: 1.55; }
+    .masonry-sentinel { bottom: -1px; }
   </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "@shelamkoff/event-bus": "https://esm.sh/@shelamkoff/event-bus@1.0.0",
+        "@shelamkoff/infinite-scroll": "https://shelamkoff.github.io/infinite-scroll/src/index.js"
+      }
+    }
+  </script>
 </head>
-<body>
-
-  <div class="panel">
-    <span class="panel__title">Masonry Demo</span>
-
-    <button class="btn btn--accent" id="addCards">+ 6 cards</button>
-    <button class="btn btn--accent" id="addImages">+ 4 images</button>
-    <button class="btn btn--accent" id="addWide">+ wide card</button>
-    <button class="btn btn--danger" id="removeLast">Remove last</button>
-    <button class="btn btn--warn" id="toggleDestroy">Destroy</button>
-
-    <div class="select-group">
-      <label>Mode:</label>
-      <select id="layoutMode">
-        <option value="masonry" selected>masonry</option>
-        <option value="row">row (→)</option>
-        <option value="column">column (↓)</option>
-      </select>
+<body data-status="loading">
+  <header class="toolbar">
+    <div class="brand">
+      <h1>Masonry</h1>
+      <div class="status" id="status">Starting…</div>
     </div>
+    <select id="mode" aria-label="Layout mode">
+      <option value="masonry">Masonry</option>
+      <option value="row">Rows</option>
+      <option value="column">Columns</option>
+    </select>
+    <button class="primary" id="add" type="button">Add 6 cards</button>
+    <button id="wide" type="button">Add wide card</button>
+    <button id="remove" type="button">Remove last</button>
+  </header>
 
-    <div class="slider-group">
-      <label>Col:</label>
-      <input type="range" id="colWidth" min="150" max="400" value="260">
-      <span class="slider-val" id="colWidthVal">260</span>
-    </div>
-
-    <div class="slider-group">
-      <label>Gap:</label>
-      <input type="range" id="gap" min="0" max="40" value="16">
-      <span class="slider-val" id="gapVal">16</span>
-    </div>
-
-    <label class="select-group" style="cursor:pointer">
-      <input type="checkbox" id="autoColSpan" checked>
-      Wide
-    </label>
-
-    <div class="log" id="log">Ready</div>
-  </div>
-
-  <div id="grid"></div>
+  <main>
+    <p class="intro">
+      Three responsive layout modes, multi-column cards, media-aware
+      measurement, animated relayout, delegated item events, and infinite
+      loading. Resize the browser or switch modes to recalculate the grid.
+    </p>
+    <section id="grid" aria-live="polite"></section>
+  </main>
 
   <script type="module">
-    import { Masonry } from './src/Masonry.js'
+    import { Masonry } from './src/index.js'
 
-    // ── State ──
-    let itemCounter = 0
-    let masonry = null
-    let destroyed = false
-
-    // ── Helpers ──
-    const COLORS = [
-      '#1a1a2e', '#16213e', '#0f3460', '#1b262c',
-      '#2d132c', '#1c1427', '#1a1a1a', '#1e272e',
-      '#2c2c34', '#1b1b2f', '#162447', '#1f4068',
+    const grid = document.querySelector('#grid')
+    const status = document.querySelector('#status')
+    const mode = document.querySelector('#mode')
+    let masonry
+    let counter = 0
+    let loading = false
+    const copy = [
+      'A compact note with only a few lines.',
+      'Responsive layouts should preserve rhythm while adapting to every viewport.',
+      'Media is measured only after it is ready, so the grid avoids late jumps.',
+      'One append operation is completed before the next begins.',
+      'Column spans let featured stories occupy more visual space.',
     ]
 
-    const LOREM = [
-      'Exploring the boundaries of modern layout techniques.',
-      'A short caption for this card.',
-      'Design is not just what it looks like. Design is how it works.',
-      'The quick brown fox jumps over the lazy dog. Typography matters.',
-      'Minimalism is about intentionality. It is not about having less for the sake of less.',
-      'Colors speak louder than words in visual design.',
-      'Every pixel matters when building for the web.',
-      'Keep it simple. Keep it clean.',
-    ]
-
-    const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
-
-    function createTextCard() {
-      const color = COLORS[rand(0, COLORS.length - 1)]
-      const text = LOREM[rand(0, LOREM.length - 1)]
-      const h = rand(100, 320)
-      const id = String(++itemCounter)
-
-      const el = document.createElement('div')
-      el.className = 'card'
-      el.style.background = color
-      el.style.height = h + 'px'
-      el.innerHTML = `
+    function createCard({ image = false, span = 1 } = {}) {
+      counter += 1
+      const element = document.createElement('article')
+      element.className = 'card'
+      const text = copy[counter % copy.length]
+      const imageHeight = 170 + (counter % 4) * 38
+      element.innerHTML = `
+        ${image ? `<img src="https://picsum.photos/seed/masonry-${counter}/720/${imageHeight}" alt="" loading="eager">` : ''}
         <div class="card__body">
-          <div class="card__title">#${id}</div>
-          <div class="card__text">${text}</div>
-          <span class="card__tag">text · ${h}px</span>
-        </div>`
-
-      return { id, element: el, height: h }
+          <div class="card__eyebrow">${span > 1 ? 'Featured' : 'Entry'} ${counter}</div>
+          <h2>${image ? 'Media-aware card' : 'Layout-ready content'}</h2>
+          <p>${text}</p>
+        </div>
+      `
+      return {
+        id: `card-${counter}`,
+        element,
+        colSpan: span,
+        ...(image ? {} : { height: 118 + (counter % 3) * 28 }),
+      }
     }
 
-    function createImageCard() {
-      const w = rand(300, 600)
-      const h = rand(200, 500)
-      const id = String(++itemCounter)
-      const seed = rand(1, 1000)
-
-      const el = document.createElement('div')
-      el.className = 'card'
-      el.style.background = '#1a1a1a'
-      el.innerHTML = `
-        <img src="https://picsum.photos/seed/${seed}/${w}/${h}" alt="Random photo" loading="eager">
-        <div class="card__body">
-          <div class="card__title">#${id}</div>
-          <span class="card__tag">image · ${w}×${h}</span>
-        </div>`
-
-      // No explicit height — ContentLoader will wait for <img> to load
-      return { id, element: el }
+    function makeBatch(size) {
+      return Array.from({ length: size }, (_, index) =>
+        createCard({ image: index % 3 === 0 }),
+      )
     }
 
-    function createMixedCard() {
-      const w = rand(300, 500)
-      const h = rand(150, 300)
-      const text = LOREM[rand(0, LOREM.length - 1)]
-      const id = String(++itemCounter)
-      const seed = rand(1, 1000)
-
-      const el = document.createElement('div')
-      el.className = 'card'
-      el.style.background = '#1b1b2f'
-      el.innerHTML = `
-        <img src="https://picsum.photos/seed/${seed}/${w}/${h}" alt="Random photo" loading="eager">
-        <div class="card__body">
-          <div class="card__title">#${id}</div>
-          <div class="card__text">${text}</div>
-          <span class="card__tag">mixed</span>
-        </div>`
-
-      return { id, element: el }
+    async function appendBatch(size = 6) {
+      if (loading) return
+      loading = true
+      status.textContent = 'Loading cards…'
+      try {
+        await masonry.append(makeBatch(size))
+        status.textContent = `${masonry.getItems().length} cards · ${masonry.getColumnCount()} columns`
+      } finally {
+        loading = false
+      }
     }
 
-    function createWideCard(span) {
-      const id = String(++itemCounter)
-      const seed = rand(1, 1000)
-      // Wide image: natural width ~ span * columnWidth
-      const w = span * 260 + rand(-20, 20)
-      const h = rand(150, 250)
-
-      const el = document.createElement('div')
-      el.className = 'card'
-      el.style.background = '#162447'
-      el.innerHTML = `
-        <img src="https://picsum.photos/seed/${seed}/${w}/${h}" alt="Wide photo" loading="eager">
-        <div class="card__body">
-          <div class="card__title">#${id}</div>
-          <span class="card__tag">wide · ${w}×${h} · auto colSpan</span>
-        </div>`
-
-      // colSpan will be auto-detected from naturalWidth
-      return { id, element: el }
-    }
-
-    function createManualWideCard(span) {
-      const text = LOREM[rand(0, LOREM.length - 1)]
-      const h = rand(120, 200)
-      const id = String(++itemCounter)
-
-      const el = document.createElement('div')
-      el.className = 'card'
-      el.style.background = '#0f3460'
-      el.style.height = h + 'px'
-      el.innerHTML = `
-        <div class="card__body">
-          <div class="card__title">#${id}</div>
-          <div class="card__text">${text}</div>
-          <span class="card__tag">manual colSpan=${span} · ${h}px</span>
-        </div>`
-
-      return { id, element: el, height: h, colSpan: span }
-    }
-
-    // ── Log ──
-    const logEl = document.getElementById('log')
-    function log(msg) {
-      logEl.textContent = msg
-    }
-
-    // ── Init masonry ──
-    function init() {
-      const colWidth = parseInt(document.getElementById('colWidth').value)
-      const gap = parseInt(document.getElementById('gap').value)
-
-      const layoutMode = document.getElementById('layoutMode').value
-
-      const autoColSpan = document.getElementById('autoColSpan').checked
-
-      masonry = new Masonry('#grid', {
-        columnWidth: colWidth,
-        layoutMode,
-        autoColSpan,
-        gap,
-        loadMore: () => {
-          log('scroll:loadmore — loading 4 more...')
-          return addBatch(4)
+    function createMasonry(items = []) {
+      masonry = new Masonry(grid, {
+        columnWidth: 245,
+        gap: 16,
+        layoutMode: mode.value,
+        infiniteScrollThreshold: 500,
+        async loadMore() {
+          await new Promise(resolve => setTimeout(resolve, 350))
+          await appendBatch(4)
         },
       })
-
-      masonry.on('item:click', ({ item, index }) => {
-        log(`item:click → id=${item.id}, index=${index}`)
+      masonry.on('item:click', ({ item }) => {
+        status.textContent = `Clicked ${item.id}`
       })
-
-      masonry.on('layout:complete', ({ containerHeight, columnCount }) => {
-        log(`layout:complete → ${columnCount} cols, height=${Math.round(containerHeight)}px, items=${masonry.getItems().length}`)
+      masonry.on('scroll:error', error => {
+        status.textContent = `Loading failed: ${error.message}`
       })
-
-      destroyed = false
-      document.getElementById('toggleDestroy').textContent = 'Destroy'
+      return items.length > 0 ? masonry.append(items) : Promise.resolve()
     }
 
-    // ── Add batch ──
-    function addBatch(count) {
-      if (!masonry) return Promise.resolve()
-      const items = []
-      for (let i = 0; i < count; i++) {
-        const r = Math.random()
-        if (r < 0.5) items.push(createTextCard())
-        else if (r < 0.8) items.push(createImageCard())
-        else items.push(createMixedCard())
-      }
-      return masonry.append(items)
-    }
-
-    function addImageBatch(count) {
-      if (!masonry) return Promise.resolve()
-      const items = []
-      for (let i = 0; i < count; i++) {
-        items.push(createImageCard())
-      }
-      return masonry.append(items)
-    }
-
-    // ── Controls ──
-    document.getElementById('addCards').addEventListener('click', () => addBatch(6))
-    document.getElementById('addImages').addEventListener('click', () => addImageBatch(4))
-
-    document.getElementById('addWide').addEventListener('click', () => {
-      if (!masonry) return
-      // One auto-detected wide image + one manual span=2 text card
-      const wideImg = createWideCard(2)
-      const manualWide = createManualWideCard(2)
-      masonry.append([wideImg, manualWide])
-    })
-
-    document.getElementById('removeLast').addEventListener('click', () => {
-      if (!masonry) return
+    mode.addEventListener('change', async () => {
       const items = masonry.getItems()
-      if (items.length === 0) { log('Nothing to remove'); return }
-      const last = items[items.length - 1]
-      masonry.remove(last.id)
-      log(`Removed #${last.id}`)
+      masonry.destroy()
+      await createMasonry(items)
+      status.textContent = `${items.length} cards · ${mode.value} mode`
+    })
+    document.querySelector('#add').addEventListener('click', () => appendBatch())
+    document.querySelector('#wide').addEventListener('click', async () => {
+      await masonry.append([createCard({ image: true, span: 2 })])
+      status.textContent = `${masonry.getItems().length} cards · wide card added`
+    })
+    document.querySelector('#remove').addEventListener('click', () => {
+      const items = masonry.getItems()
+      if (items.length === 0) return
+      masonry.remove(items.at(-1).id)
+      status.textContent = `${masonry.getItems().length} cards`
     })
 
-    document.getElementById('toggleDestroy').addEventListener('click', () => {
-      if (destroyed) {
-        init()
-        log('Re-initialized')
-      } else {
-        masonry.destroy()
-        masonry = null
-        destroyed = true
-        document.getElementById('toggleDestroy').textContent = 'Init'
-        log('Destroyed')
-      }
-    })
-
-    // Sliders — destroy & re-init with new options
-    const colWidthInput = document.getElementById('colWidth')
-    const colWidthVal = document.getElementById('colWidthVal')
-    const gapInput = document.getElementById('gap')
-    const gapVal = document.getElementById('gapVal')
-
-    colWidthInput.addEventListener('input', () => {
-      colWidthVal.textContent = colWidthInput.value
-      reinit()
-    })
-
-    gapInput.addEventListener('input', () => {
-      gapVal.textContent = gapInput.value
-      reinit()
-    })
-
-    document.getElementById('layoutMode').addEventListener('change', () => reinit())
-    document.getElementById('autoColSpan').addEventListener('change', () => reinit())
-
-    let reinitTimer
-    function reinit() {
-      clearTimeout(reinitTimer)
-      reinitTimer = setTimeout(() => {
-        if (destroyed || !masonry) return
-        // Save current item data
-        const saved = masonry.getItems()
-        masonry.destroy()
-        init()
-        if (saved.length > 0) {
-          // Re-create elements (old ones were removed from DOM)
-          const fresh = saved.map(d => {
-            const clone = d.element.cloneNode(true)
-            return { id: d.id, element: clone, height: d.height, colSpan: d.colSpan }
-          })
-          masonry.append(fresh)
-        }
-      }, 200)
-    }
-
-    // ── Boot ──
-    init()
-    addBatch(12)
+    await createMasonry()
+    await appendBatch(12)
+    document.body.dataset.status = 'pass'
   </script>
 </body>
 </html>

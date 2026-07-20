@@ -17,6 +17,8 @@ export interface MasonryOptions {
   fadeInDuration?: number
   /** Pixel threshold from the bottom to trigger loadMore. Default: 200. */
   infiniteScrollThreshold?: number
+  /** Maximum wait for media and fonts before measurement, in ms. Default: 10000. */
+  contentLoadTimeout?: number
   /** Callback fired when the user scrolls near the bottom. */
   loadMore?: () => void | Promise<void>
 }
@@ -68,6 +70,8 @@ export type MasonryEventMap = {
   'layout:complete': [payload: { containerHeight: number; columnCount: number }]
   /** Fired when loadMore is triggered by infinite scroll. */
   'scroll:loadmore': []
+  /** Fired when loadMore rejects or throws. */
+  'scroll:error': [error: unknown]
 }
 
 export type MasonryEventName = keyof MasonryEventMap

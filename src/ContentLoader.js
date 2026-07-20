@@ -1,9 +1,5 @@
 /**
- * Waits for all media content inside a DOM element to finish loading
- * before height measurement. Detects <img>, <video>, and web fonts.
- *
- * Uses Promise.allSettled so a single broken asset never blocks layout.
- * Includes a configurable timeout to prevent indefinite blocking.
+ * Waits until images, video metadata, and web fonts are ready for measurement.
  */
 export class ContentLoader {
   #pending = new Set()
@@ -13,98 +9,107 @@ export class ContentLoader {
    * @param {{ timeout?: number }} [options]
    */
   constructor(options = {}) {
-    /** Content-loading timeout in ms. Default: 10 000. */
-    this.#timeout = options.timeout ?? 10_000
+    if (!options || typeof options !== 'object' || Array.isArray(options)) {
+      throw new TypeError('ContentLoader options must be an object')
+    }
+    const timeout = options.timeout ?? 10_000
+    if (!Number.isFinite(timeout) || timeout < 0) {
+      throw new RangeError('ContentLoader timeout must be a finite number greater than or equal to 0')
+    }
+    this.#timeout = timeout
   }
 
   /**
-   * Wait for all media inside the element to be ready.
    * @param {HTMLElement} element
    * @returns {Promise<void>}
    */
   async waitForContent(element) {
-    const ac = new AbortController()
-    this.#pending.add(ac)
+    if (typeof HTMLElement === 'undefined' || !(element instanceof HTMLElement)) {
+      throw new TypeError('ContentLoader element must be an HTMLElement')
+    }
+
+    const controller = new AbortController()
+    const { signal } = controller
+    this.#pending.add(controller)
 
     try {
-      const promises = []
-
-      // 1. Images
-      const images = element.querySelectorAll('img')
-      for (const img of images) {
-        if (img.complete) continue
-
-        promises.push(
-          new Promise((resolve) => {
-            const done = () => {
-              img.removeEventListener('load', done)
-              img.removeEventListener('error', done)
-              resolve()
-            }
-            img.addEventListener('load', done)
-            img.addEventListener('error', done)
-          }),
-        )
+      const pendingMedia = []
+      const images = this.#collect(element, 'img')
+      for (const image of images) {
+        if (!image.complete) {
+          pendingMedia.push(this.#waitForEvents(image, ['load', 'error'], signal))
+        }
       }
 
-      // 2. Video
-      const videos = element.querySelectorAll('video')
+      const videos = this.#collect(element, 'video')
+      const metadataReady = typeof HTMLMediaElement === 'undefined'
+        ? 1
+        : HTMLMediaElement.HAVE_METADATA
       for (const video of videos) {
-        if (video.readyState >= HTMLMediaElement.HAVE_METADATA) continue
-
-        promises.push(
-          new Promise((resolve) => {
-            const done = () => {
-              video.removeEventListener('loadedmetadata', done)
-              video.removeEventListener('error', done)
-              resolve()
-            }
-            video.addEventListener('loadedmetadata', done)
-            video.addEventListener('error', done)
-          }),
-        )
+        if (video.readyState < metadataReady) {
+          pendingMedia.push(this.#waitForEvents(video, ['loadedmetadata', 'error'], signal))
+        }
       }
 
-      // 3. Web fonts
-      if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
-        promises.push(document.fonts.ready.then(() => undefined))
+      if (
+        typeof document !== 'undefined'
+        && document.fonts
+        && document.fonts.status !== 'loaded'
+      ) {
+        pendingMedia.push(Promise.resolve(document.fonts.ready).then(() => undefined))
       }
 
-      if (promises.length === 0) return
+      if (pendingMedia.length === 0) return
 
-      // Timeout timer — cleared on completion to avoid lingering handles
       let timer
-      const timeoutPromise = new Promise((resolve) => {
+      const timeout = new Promise(resolve => {
         timer = setTimeout(resolve, this.#timeout)
       })
+      const aborted = new Promise(resolve => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
 
-      // Abort-aware race: resolve all, bail on cancel, or timeout
       try {
         await Promise.race([
-          Promise.allSettled(promises).then(() => undefined),
-          new Promise((_, reject) => {
-            ac.signal.addEventListener('abort', () =>
-              reject(new DOMException('Cancelled', 'AbortError')),
-            )
-          }),
-          timeoutPromise,
+          Promise.allSettled(pendingMedia),
+          aborted,
+          timeout,
         ])
       } finally {
         clearTimeout(timer)
       }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      throw err
     } finally {
-      this.#pending.delete(ac)
+      controller.abort()
+      this.#pending.delete(controller)
     }
   }
 
-  /** Cancel all pending content-loading promises (called from destroy). */
   cancelAll() {
-    for (const ac of this.#pending) {
-      ac.abort()
+    for (const controller of this.#pending) {
+      controller.abort()
     }
     this.#pending.clear()
+  }
+
+  #collect(element, selector) {
+    const descendants = Array.from(element.querySelectorAll(selector))
+    return element.matches(selector) ? [element, ...descendants] : descendants
+  }
+
+  #waitForEvents(target, eventNames, signal) {
+    return new Promise(resolve => {
+      const done = () => {
+        for (const eventName of eventNames) {
+          target.removeEventListener(eventName, done)
+        }
+        signal.removeEventListener('abort', done)
+        resolve()
+      }
+
+      for (const eventName of eventNames) {
+        target.addEventListener(eventName, done, { once: true })
+      }
+      signal.addEventListener('abort', done, { once: true })
+    })
   }
 }

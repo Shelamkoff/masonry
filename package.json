@@ -1,0 +1,58 @@
+{
+  "name": "@shelamkoff/masonry",
+  "version": "1.0.0",
+  "description": "Framework-agnostic responsive masonry grid with row and column modes, column spans, media-aware measurement, transitions, and infinite loading",
+  "type": "module",
+  "sideEffects": ["**/*.css"],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./styles.css": "./dist/styles/masonry.css",
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "README.ru.md", "LICENSE"],
+  "scripts": {
+    "build": "node scripts/build-package.mjs",
+    "demo": "node scripts/dev-server.mjs /demo.html",
+    "test": "node --test",
+    "prepublishOnly": "npm test",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@shelamkoff/event-bus": "^1.0.0",
+    "@shelamkoff/infinite-scroll": "^1.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  },
+  "keywords": [
+    "javascript",
+    "masonry",
+    "masonry-layout",
+    "grid",
+    "responsive-layout",
+    "waterfall-grid",
+    "infinite-scroll",
+    "image-grid",
+    "column-span",
+    "vanilla-js",
+    "framework-agnostic",
+    "esm",
+    "typescript"
+  ],
+  "author": "Shelamkoff",
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shelamkoff/masonry.git"
+  },
+  "homepage": "https://shelamkoff.github.io/masonry/",
+  "bugs": { "url": "https://github.com/Shelamkoff/masonry/issues" },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
