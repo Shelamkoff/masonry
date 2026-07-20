@@ -101,7 +101,7 @@ export class Masonry {
         container,
         async () => {
           this.emit('scroll:loadmore')
-          await this.#options.loadMore()
+          return this.#options.loadMore()
         },
         {
           threshold: this.#options.infiniteScrollThreshold,

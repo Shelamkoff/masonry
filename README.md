@@ -70,7 +70,7 @@ order.
 | `fadeInDuration` | `number` | `400` | New-item fade duration in ms |
 | `contentLoadTimeout` | `number` | `10000` | Maximum wait for media/fonts in ms |
 | `infiniteScrollThreshold` | `number` | `200` | Preload distance for `loadMore` |
-| `loadMore` | `() => void \| Promise<void>` | — | Enables infinite loading |
+| `loadMore` | `() => boolean \| void \| Promise<boolean \| void>` | — | Enables infinite loading; return `false` at the end |
 
 All numeric options must be finite. Dimensions and durations cannot be
 negative; `columnWidth` must be greater than zero.
@@ -124,6 +124,9 @@ grid.on('layout:complete', ({ containerHeight, columnCount }) => {})
 grid.on('scroll:loadmore', () => {})
 grid.on('scroll:error', error => {})
 ```
+
+Return `false` from `loadMore` when the data source is exhausted. Masonry then
+pauses its sentinel instead of repeatedly invoking an empty loader.
 
 `on` and `once` return an unsubscribe function.
 

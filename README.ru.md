@@ -58,7 +58,7 @@ await grid.append([
 | `fadeInDuration` | `number` | `400` | Появление новых элементов, мс |
 | `contentLoadTimeout` | `number` | `10000` | Максимальное ожидание медиа, мс |
 | `infiniteScrollThreshold` | `number` | `200` | Упреждающий отступ infinite scroll |
-| `loadMore` | `() => void \| Promise<void>` | — | Включает infinite scroll |
+| `loadMore` | `() => boolean \| void \| Promise<boolean \| void>` | — | Включает infinite scroll; `false` завершает список |
 
 Все числовые значения должны быть конечными. Размеры и длительности не могут
 быть отрицательными, а `columnWidth` должен быть больше нуля.
@@ -93,6 +93,9 @@ grid.on('layout:complete', ({ containerHeight, columnCount }) => {})
 grid.on('scroll:loadmore', () => {})
 grid.on('scroll:error', error => {})
 ```
+
+Верните `false` из `loadMore`, когда источник данных закончился. Masonry
+поставит sentinel на паузу и не будет повторять пустую загрузку.
 
 ## Разработка
 

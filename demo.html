@@ -113,8 +113,8 @@
   <main>
     <p class="intro">
       Three responsive layout modes, multi-column cards, media-aware
-      measurement, animated relayout, delegated item events, and infinite
-      loading. Resize the browser or switch modes to recalculate the grid.
+      measurement, animated relayout, and delegated item events. Add or
+      remove cards, resize the browser, or switch modes to recalculate the grid.
     </p>
     <section id="grid" aria-live="polite"></section>
   </main>
@@ -125,9 +125,13 @@
     const grid = document.querySelector('#grid')
     const status = document.querySelector('#status')
     const mode = document.querySelector('#mode')
+    const addButton = document.querySelector('#add')
+    const wideButton = document.querySelector('#wide')
+    const removeButton = document.querySelector('#remove')
+    const controls = [mode, addButton, wideButton, removeButton]
     let masonry
     let counter = 0
-    let loading = false
+    let actionQueue = Promise.resolve()
     const copy = [
       'A compact note with only a few lines.',
       'Responsive layouts should preserve rhythm while adapting to every viewport.',
@@ -154,7 +158,6 @@
         id: `card-${counter}`,
         element,
         colSpan: span,
-        ...(image ? {} : { height: 118 + (counter % 3) * 28 }),
       }
     }
 
@@ -165,15 +168,9 @@
     }
 
     async function appendBatch(size = 6) {
-      if (loading) return
-      loading = true
-      status.textContent = 'Loading cards…'
-      try {
-        await masonry.append(makeBatch(size))
-        status.textContent = `${masonry.getItems().length} cards · ${masonry.getColumnCount()} columns`
-      } finally {
-        loading = false
-      }
+      status.textContent = 'Measuring cards…'
+      await masonry.append(makeBatch(size))
+      status.textContent = `${masonry.getItems().length} cards · ${masonry.getColumnCount()} columns`
     }
 
     function createMasonry(items = []) {
@@ -181,37 +178,56 @@
         columnWidth: 245,
         gap: 16,
         layoutMode: mode.value,
-        infiniteScrollThreshold: 500,
-        async loadMore() {
-          await new Promise(resolve => setTimeout(resolve, 350))
-          await appendBatch(4)
-        },
       })
       masonry.on('item:click', ({ item }) => {
         status.textContent = `Clicked ${item.id}`
       })
-      masonry.on('scroll:error', error => {
-        status.textContent = `Loading failed: ${error.message}`
-      })
       return items.length > 0 ? masonry.append(items) : Promise.resolve()
     }
 
-    mode.addEventListener('change', async () => {
-      const items = masonry.getItems()
-      masonry.destroy()
-      await createMasonry(items)
-      status.textContent = `${items.length} cards · ${mode.value} mode`
+    function setBusy(value) {
+      grid.setAttribute('aria-busy', String(value))
+      for (const control of controls) control.disabled = value
+    }
+
+    function runAction(action) {
+      actionQueue = actionQueue.then(async () => {
+        setBusy(true)
+        try {
+          await action()
+        } catch (error) {
+          status.textContent = `Action failed: ${error.message}`
+        } finally {
+          setBusy(false)
+        }
+      })
+      return actionQueue
+    }
+
+    mode.addEventListener('change', () => {
+      void runAction(async () => {
+        const items = masonry.getItems()
+        masonry.destroy()
+        await createMasonry(items)
+        status.textContent = `${items.length} cards · ${mode.value} mode`
+      })
     })
-    document.querySelector('#add').addEventListener('click', () => appendBatch())
-    document.querySelector('#wide').addEventListener('click', async () => {
-      await masonry.append([createCard({ image: true, span: 2 })])
-      status.textContent = `${masonry.getItems().length} cards · wide card added`
+    addButton.addEventListener('click', () => {
+      void runAction(() => appendBatch())
     })
-    document.querySelector('#remove').addEventListener('click', () => {
-      const items = masonry.getItems()
-      if (items.length === 0) return
-      masonry.remove(items.at(-1).id)
-      status.textContent = `${masonry.getItems().length} cards`
+    wideButton.addEventListener('click', () => {
+      void runAction(async () => {
+        await masonry.append([createCard({ image: true, span: 2 })])
+        status.textContent = `${masonry.getItems().length} cards · wide card added`
+      })
+    })
+    removeButton.addEventListener('click', () => {
+      void runAction(() => {
+        const items = masonry.getItems()
+        if (items.length === 0) return
+        masonry.remove(items.at(-1).id)
+        status.textContent = `${masonry.getItems().length} cards`
+      })
     })
 
     await createMasonry()

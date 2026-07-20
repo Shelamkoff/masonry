@@ -24,12 +24,18 @@ class FakeResizeObserver {
 }
 
 class FakeIntersectionObserver {
+  static instances = []
+
   constructor(callback) {
     this.callback = callback
+    FakeIntersectionObserver.instances.push(this)
   }
   observe() {}
   unobserve() {}
   disconnect() {}
+  intersect(value = true) {
+    this.callback([{ isIntersecting: value }])
+  }
 }
 
 globalThis.ResizeObserver = FakeResizeObserver
@@ -55,6 +61,8 @@ function card(label) {
   element.textContent = label
   return element
 }
+
+const flush = () => new Promise(resolve => setImmediate(resolve))
 
 test('appends, lays out, emits clicks, and returns defensive data objects', async () => {
   const { container } = createContainer()
@@ -168,5 +176,29 @@ test('validates containers, options, and item descriptors', () => {
     () => masonry.append([{ id: 'x', element: card('x'), colSpan: 0 }]),
     RangeError,
   )
+  masonry.destroy()
+})
+
+test('stops infinite loading when loadMore returns false', async () => {
+  FakeIntersectionObserver.instances = []
+  const { container } = createContainer()
+  let calls = 0
+  const masonry = new Masonry(container, {
+    columnWidth: 200,
+    loadMore() {
+      calls += 1
+      return false
+    },
+  })
+  const observer = FakeIntersectionObserver.instances.at(-1)
+
+  observer.intersect()
+  await flush()
+  await flush()
+  observer.intersect()
+  await flush()
+  await flush()
+
+  assert.equal(calls, 1)
   masonry.destroy()
 })

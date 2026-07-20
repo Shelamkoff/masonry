@@ -20,7 +20,10 @@ export interface MasonryOptions {
   /** Maximum wait for media and fonts before measurement, in ms. Default: 10000. */
   contentLoadTimeout?: number
   /** Callback fired when the user scrolls near the bottom. */
-  loadMore?: () => void | Promise<void>
+  /**
+   * Callback fired near the bottom. Return false when there are no more items.
+   */
+  loadMore?: () => boolean | void | Promise<boolean | void>
 }
 
 export interface MasonryItemData {
