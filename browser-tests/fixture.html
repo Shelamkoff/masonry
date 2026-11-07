@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'nonce-masonry-tests'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; require-trusted-types-for 'script'; trusted-types 'none'">
+  <link rel="stylesheet" href="/styles/masonry.css">
+  <title>Masonry browser checks</title>
+  <script type="importmap" nonce="masonry-tests">
+    {
+      "imports": {
+        "@shelamkoff/event-bus": "/node_modules/@shelamkoff/event-bus/dist/index.js",
+        "@shelamkoff/infinite-scroll": "/node_modules/@shelamkoff/infinite-scroll/dist/src/index.js"
+      }
+    }
+  </script>
+  <script type="module" src="/browser-tests/fixture.js"></script>
+</head>
+<body></body>
+</html>

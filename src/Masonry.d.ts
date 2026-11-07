@@ -1,4 +1,4 @@
-import type { MasonryOptions, MasonryItemData, MasonryEventMap } from './types'
+import type { MasonryOptions, MasonryItemData, MasonryEventMap } from './types.js'
 
 type Handler<T extends any[]> = (...args: T) => void
 

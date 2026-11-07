@@ -15,6 +15,7 @@ animated relayout, delegated item events, and optional infinite loading.
 - Serialized asynchronous appends
 - Image, video metadata, and web-font readiness checks
 - Configurable content-loading timeout
+- Automatic relayout when measured content changes after the initial append
 - Optional `IntersectionObserver` infinite loading
 - Click, layout, load, and load-error events
 - Clean teardown that unwraps items and restores container styles
@@ -55,7 +56,12 @@ await grid.append([
 
 When `height` is omitted, Masonry waits for media inside the element and then
 measures the rendered wrapper. Appends are serialized and preserve their call
-order.
+order. Media in the same batch is awaited concurrently, so their timeout delays
+do not accumulate. Fixed geometry skips unnecessary media waits.
+Late media and changes to measured item heights trigger another layout.
+
+The grid uses the container's CSS content width. Padding, borders, scrollbar
+gutters, and CSS transforms are accounted for without changing column sizing.
 
 ## Options
 
@@ -89,7 +95,8 @@ interface MasonryItemData {
 
 IDs and elements must be unique within an instance. `colSpan` is a positive
 integer and is clamped to the current number of columns. In column mode every
-item occupies one column.
+item occupies one column. The container, its ancestors, and nested item elements
+cannot be appended as items. IDs are trimmed consistently by `append` and `remove`.
 
 ## Methods
 
@@ -126,7 +133,9 @@ grid.on('scroll:error', error => {})
 ```
 
 Return `false` from `loadMore` when the data source is exhausted. Masonry then
-pauses its sentinel instead of repeatedly invoking an empty loader.
+pauses its sentinel instead of repeatedly invoking an empty loader. After a
+successful append, it checks the sentinel again, allowing short pages to fill
+the viewport. A callback that adds no items does not cause an automatic retry loop.
 
 `on` and `once` return an unsubscribe function.
 
@@ -135,9 +144,24 @@ pauses its sentinel instead of repeatedly invoking an empty loader.
 ```bash
 npm install
 npm test
-npm run build
+npm run test:types
+npm run test:package
+npx playwright install chromium firefox webkit
+npm run test:browser
 npm run demo
 ```
+
+`npm run verify` runs every release check, including real-browser tests in all
+three engines. `prepublishOnly` runs the same checks. The package check installs
+the generated tarball into a clean consumer and verifies ESM/CSS exports and
+strict TypeScript consumers using Node16, NodeNext, and Bundler resolution.
+
+The runtime requires a browser document and `ResizeObserver`; infinite loading
+also requires `IntersectionObserver`. Importing the package during SSR is safe,
+but instantiate the grid after mounting in the browser. The container must be
+an HTML element from the current browser realm; item elements can be adopted
+from another document. Base CSS is required. Large unbounded feeds retain their
+DOM items; remove old items or provide application-level windowing when needed.
 
 ## License
 

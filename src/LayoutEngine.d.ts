@@ -1,4 +1,4 @@
-import type { LayoutItem, LayoutResult, LayoutMode } from './types'
+import type { LayoutItem, LayoutResult, LayoutMode } from './types.js'
 
 export class LayoutEngine {
   calculate(
