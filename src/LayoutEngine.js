@@ -1,3 +1,5 @@
+import { getColumnCount } from './utils.js'
+
 const LAYOUT_MODES = new Set(['masonry', 'row', 'column'])
 
 /**
@@ -15,7 +17,7 @@ export class LayoutEngine {
   calculate(items, containerWidth, columnWidth, gap, mode = 'masonry') {
     this.#validateInput(items, containerWidth, columnWidth, gap, mode)
 
-    const columnCount = Math.max(1, Math.floor((containerWidth + gap) / (columnWidth + gap)))
+    const columnCount = getColumnCount(containerWidth, columnWidth, gap)
     const actualWidth = (containerWidth - (columnCount - 1) * gap) / columnCount
 
     if (mode === 'row') {
@@ -28,7 +30,16 @@ export class LayoutEngine {
   }
 
   #calculateMasonry(items, actualWidth, gap, columnCount) {
-    const columnHeights = new Array(columnCount).fill(0)
+    // A layout can never reach a column beyond the sum of its item spans.
+    // Avoid allocating empty columns when the requested width is very small.
+    const occupiedColumns = columnCount <= items.length
+      ? columnCount
+      : items.reduce(
+        (count, item) => Math.min(columnCount, count + this.#getColSpan(item, columnCount)),
+        0,
+      )
+    const columnHeights = new Array(occupiedColumns).fill(0)
+    let maxima
 
     for (const item of items) {
       const span = this.#getColSpan(item, columnCount)
@@ -36,18 +47,44 @@ export class LayoutEngine {
       let bestColumn = 0
       let bestHeight = Infinity
 
-      for (let column = 0; column <= columnCount - span; column += 1) {
-        let groupHeight = 0
-        for (let offset = 0; offset < span; offset += 1) {
-          groupHeight = Math.max(groupHeight, columnHeights[column + offset])
+      if (span === 1) {
+        for (let column = 0; column < occupiedColumns; column += 1) {
+          if (columnHeights[column] < bestHeight) {
+            bestColumn = column
+            bestHeight = columnHeights[column]
+            if (bestHeight === 0) break
+          }
         }
-        if (groupHeight < bestHeight) {
-          bestColumn = column
-          bestHeight = groupHeight
+      } else if (span === occupiedColumns) {
+        bestHeight = 0
+        for (const height of columnHeights) bestHeight = Math.max(bestHeight, height)
+      } else {
+        // A monotonic deque finds every span's maximum in one pass. Reuse its
+        // storage between items instead of rescanning each overlapping group.
+        maxima ??= new Array(occupiedColumns)
+        let head = 0
+        let tail = 0
+
+        for (let column = 0; column < occupiedColumns; column += 1) {
+          const firstColumn = column - span + 1
+          while (head < tail && maxima[head] < firstColumn) head += 1
+          while (
+            head < tail
+            && columnHeights[maxima[tail - 1]] <= columnHeights[column]
+          ) tail -= 1
+          maxima[tail++] = column
+          if (firstColumn < 0) continue
+
+          const groupHeight = columnHeights[maxima[head]]
+          if (groupHeight < bestHeight) {
+            bestColumn = firstColumn
+            bestHeight = groupHeight
+            if (bestHeight === 0) break
+          }
         }
       }
 
-      item.x = bestColumn * (actualWidth + gap)
+      item.x = bestColumn * actualWidth + bestColumn * gap
       item.y = bestHeight
       item.renderedWidth = this.#spanWidth(span, actualWidth, gap)
       item.renderedHeight = height
@@ -58,11 +95,10 @@ export class LayoutEngine {
       }
     }
 
-    return this.#result(items, columnHeights, gap, columnCount)
+    return this.#result(items, columnCount)
   }
 
   #calculateRow(items, actualWidth, gap, columnCount) {
-    const columnHeights = new Array(columnCount).fill(0)
     let column = 0
     let rowTop = 0
     let rowHeight = 0
@@ -77,16 +113,11 @@ export class LayoutEngine {
         column = 0
       }
 
-      item.x = column * (actualWidth + gap)
+      item.x = column * actualWidth + column * gap
       item.y = rowTop
       item.renderedWidth = this.#spanWidth(span, actualWidth, gap)
       item.renderedHeight = height
       rowHeight = Math.max(rowHeight, height)
-
-      const bottom = rowTop + height + gap
-      for (let offset = 0; offset < span; offset += 1) {
-        columnHeights[column + offset] = bottom
-      }
 
       column += span
       if (column >= columnCount) {
@@ -96,38 +127,33 @@ export class LayoutEngine {
       }
     }
 
-    return this.#result(items, columnHeights, gap, columnCount)
+    return this.#result(items, columnCount)
   }
 
   #calculateColumn(items, actualWidth, gap, columnCount) {
-    const columnHeights = new Array(columnCount).fill(0)
     const base = Math.floor(items.length / columnCount)
     const extra = items.length % columnCount
-    const boundaries = new Array(columnCount + 1).fill(0)
-
-    for (let column = 0; column < columnCount; column += 1) {
-      boundaries[column + 1] = boundaries[column] + base + (column < extra ? 1 : 0)
-    }
+    let column = 0
+    let columnEnd = base + (extra > 0 ? 1 : 0)
+    let columnHeight = 0
 
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]
       const height = this.#getHeight(item)
-      let column = columnCount - 1
-      for (let candidate = 0; candidate < columnCount; candidate += 1) {
-        if (index < boundaries[candidate + 1]) {
-          column = candidate
-          break
-        }
+      if (index === columnEnd) {
+        column += 1
+        columnEnd += base + (column < extra ? 1 : 0)
+        columnHeight = 0
       }
 
-      item.x = column * (actualWidth + gap)
-      item.y = columnHeights[column]
+      item.x = column * actualWidth + column * gap
+      item.y = columnHeight
       item.renderedWidth = actualWidth
       item.renderedHeight = height
-      columnHeights[column] = item.y + height + gap
+      columnHeight = item.y + height + gap
     }
 
-    return this.#result(items, columnHeights, gap, columnCount)
+    return this.#result(items, columnCount)
   }
 
   #validateInput(items, containerWidth, columnWidth, gap, mode) {
@@ -175,11 +201,17 @@ export class LayoutEngine {
     return span * actualWidth + (span - 1) * gap
   }
 
-  #result(items, columnHeights, gap, columnCount) {
-    const maxHeight = columnHeights.length > 0 ? Math.max(...columnHeights) : 0
+  #result(items, columnCount) {
+    const containerHeight = items.reduce(
+      (height, item) => Math.max(height, item.y + item.renderedHeight),
+      0,
+    )
+    if (!Number.isFinite(containerHeight)) {
+      throw new RangeError('Layout container height must remain finite')
+    }
     return {
       items,
-      containerHeight: items.length > 0 ? Math.max(0, maxHeight - gap) : 0,
+      containerHeight,
       columnCount,
     }
   }
