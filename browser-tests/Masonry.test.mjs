@@ -125,6 +125,45 @@ for (const name of names) {
       })
     })
 
+    test('fractional gaps retain every column that fits without crossing the minimum width', async () => {
+      await check(async page => {
+        const failures = await page.evaluate(async () => {
+          const failures = []
+          for (const layoutMode of ['masonry', 'row', 'column']) {
+            for (const [width, expectedColumns] of [[301, 6], [300.9, 5]]) {
+              const container = document.createElement('section')
+              container.style.width = `${width}px`
+              document.body.appendChild(container)
+              const grid = new Masonry(container, { columnWidth: 50, gap: 0.2, layoutMode })
+              try {
+                await grid.append(Array.from({ length: 6 }, (_, index) => {
+                  const element = document.createElement('article')
+                  element.style.height = '20px'
+                  return { id: String(index), element, height: 20, colSpan: 1 }
+                }))
+                if (grid.getColumnCount() !== expectedColumns) {
+                  failures.push(`${layoutMode}/${width}: expected ${expectedColumns} columns, got ${grid.getColumnCount()}`)
+                }
+                const bounds = container.getBoundingClientRect()
+                for (const wrapper of container.children) {
+                  const box = wrapper.getBoundingClientRect()
+                  if (box.width < 49.99 || box.right > bounds.right + 0.03
+                    || box.bottom > bounds.bottom + 0.03) {
+                    failures.push(`${layoutMode}/${width}: invalid item bounds`)
+                  }
+                }
+              } finally {
+                grid.destroy()
+                container.remove()
+              }
+            }
+          }
+          return failures
+        })
+        assert.deepEqual(failures, [])
+      })
+    })
+
     test('container resize remeasures wrapped text and recalculates columns', async () => {
       await check(async page => {
         await page.evaluate(async () => {

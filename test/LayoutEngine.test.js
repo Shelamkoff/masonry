@@ -174,6 +174,58 @@ test('rejects an unrepresentable column count before allocating the skyline', ()
   )
 })
 
+for (const mode of ['masonry', 'row']) {
+  test(`${mode} preserves a finite container width for a full-span item near overflow`, () => {
+    const result = new LayoutEngine().calculate(
+      [item('full', 20, 5)],
+      Number.MAX_VALUE,
+      3.581004724642152e307,
+      1.7976931348623156e305,
+      mode,
+    )
+
+    assert.equal(result.columnCount, 5)
+    assert.equal(result.items[0].x, 0)
+    assert.equal(result.items[0].renderedWidth, Number.MAX_VALUE)
+  })
+}
+
+for (const mode of ['masonry', 'row', 'column']) {
+  test(`${mode} keeps the last column inside a container near the numeric limit`, () => {
+    const result = new LayoutEngine().calculate(
+      [item('a', 20), item('b', 20)],
+      Number.MAX_VALUE,
+      7.386560900664505e307,
+      3.203809547279374e307,
+      mode,
+    )
+    const last = result.items.at(-1)
+    const right = last.x + last.renderedWidth
+
+    assert.equal(result.columnCount, 2)
+    assert.ok(Number.isFinite(last.x) && Number.isFinite(last.renderedWidth))
+    assert.ok(Number.isFinite(right) && right <= Number.MAX_VALUE)
+    assert.ok(Number.MAX_VALUE - right <= Number.EPSILON * Number.MAX_VALUE)
+  })
+
+  test(`${mode} avoids overflow when right-edge subtraction is rounded up`, () => {
+    const result = new LayoutEngine().calculate(
+      [item('a', 20), item('b', 20)],
+      Number.MAX_VALUE,
+      8.89947096465603e307,
+      1.7798941929329858e306,
+      mode,
+    )
+    const last = result.items.at(-1)
+    const right = last.x + last.renderedWidth
+
+    assert.equal(result.columnCount, 2)
+    assert.ok(Number.isFinite(last.x) && Number.isFinite(last.renderedWidth))
+    assert.ok(Number.isFinite(right) && right <= Number.MAX_VALUE)
+    assert.ok(Number.MAX_VALUE - right <= Number.EPSILON * Number.MAX_VALUE)
+  })
+}
+
 test('preserves exact-fit fractional columns without subtraction rounding them down', () => {
   const result = new LayoutEngine().calculate([item('a', 20)], 0.03, 0.01, 0)
 
@@ -187,6 +239,28 @@ test('preserves fractional columns when subtracting their gaps loses precision',
   assert.equal(result.columnCount, 4)
   assert.ok(Math.abs(result.items[0].renderedWidth - 0.01) < Number.EPSILON)
 })
+
+for (const mode of ['masonry', 'row', 'column']) {
+  for (const { step, expected } of [
+    { step: -1, expected: 5 },
+    { step: 0, expected: 6 },
+    { step: 1, expected: 6 },
+  ]) {
+    test(`${mode} keeps ${expected} columns at the fractional-gap fit boundary (${step})`, () => {
+      const boundary = new DataView(new ArrayBuffer(8))
+      boundary.setFloat64(0, 301)
+      boundary.setBigUint64(0, boundary.getBigUint64(0) + BigInt(step))
+      const containerWidth = boundary.getFloat64(0)
+      const items = Array.from({ length: 6 }, (_, index) => item(String(index), 20))
+
+      const result = new LayoutEngine().calculate(items, containerWidth, 50, 0.2, mode)
+
+      assert.equal(result.columnCount, expected)
+      assert.ok(result.items.every(entry => entry.renderedWidth >= 50))
+      if (expected === 6) assert.equal(result.containerHeight, 20)
+    })
+  }
+}
 
 for (const mode of ['masonry', 'row', 'column']) {
   test(`${mode} mode keeps mixed spans inside the container without overlaps`, () => {

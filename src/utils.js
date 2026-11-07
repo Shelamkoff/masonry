@@ -74,6 +74,15 @@ export function getColumnCount(containerWidth, columnWidth, gap) {
     ) break
     count -= 1
   }
+
+  // Division can round an exact fit below the next integer. Only recover that
+  // column when its actual rendered width still meets the requested minimum.
+  const nextCount = count + 1
+  if (
+    Number.isSafeInteger(nextCount)
+    && (containerWidth - count * gap) / nextCount >= columnWidth
+  ) count = nextCount
+
   return count
 }
 

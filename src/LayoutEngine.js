@@ -21,15 +21,15 @@ export class LayoutEngine {
     const actualWidth = (containerWidth - (columnCount - 1) * gap) / columnCount
 
     if (mode === 'row') {
-      return this.#calculateRow(items, actualWidth, gap, columnCount)
+      return this.#calculateRow(items, actualWidth, gap, columnCount, containerWidth)
     }
     if (mode === 'column') {
-      return this.#calculateColumn(items, actualWidth, gap, columnCount)
+      return this.#calculateColumn(items, actualWidth, gap, columnCount, containerWidth)
     }
-    return this.#calculateMasonry(items, actualWidth, gap, columnCount)
+    return this.#calculateMasonry(items, actualWidth, gap, columnCount, containerWidth)
   }
 
-  #calculateMasonry(items, actualWidth, gap, columnCount) {
+  #calculateMasonry(items, actualWidth, gap, columnCount, containerWidth) {
     // A layout can never reach a column beyond the sum of its item spans.
     // Avoid allocating empty columns when the requested width is very small.
     const occupiedColumns = columnCount <= items.length
@@ -84,9 +84,13 @@ export class LayoutEngine {
         }
       }
 
-      item.x = bestColumn * actualWidth + bestColumn * gap
+      item.renderedWidth = span === columnCount
+        ? containerWidth
+        : this.#spanWidth(span, actualWidth, gap)
+      item.x = bestColumn + span === columnCount
+        ? this.#rightAlignedX(containerWidth, item.renderedWidth)
+        : bestColumn * actualWidth + bestColumn * gap
       item.y = bestHeight
-      item.renderedWidth = this.#spanWidth(span, actualWidth, gap)
       item.renderedHeight = height
 
       const bottom = item.y + height + gap
@@ -98,7 +102,7 @@ export class LayoutEngine {
     return this.#result(items, columnCount)
   }
 
-  #calculateRow(items, actualWidth, gap, columnCount) {
+  #calculateRow(items, actualWidth, gap, columnCount, containerWidth) {
     let column = 0
     let rowTop = 0
     let rowHeight = 0
@@ -113,9 +117,13 @@ export class LayoutEngine {
         column = 0
       }
 
-      item.x = column * actualWidth + column * gap
+      item.renderedWidth = span === columnCount
+        ? containerWidth
+        : this.#spanWidth(span, actualWidth, gap)
+      item.x = column + span === columnCount
+        ? this.#rightAlignedX(containerWidth, item.renderedWidth)
+        : column * actualWidth + column * gap
       item.y = rowTop
-      item.renderedWidth = this.#spanWidth(span, actualWidth, gap)
       item.renderedHeight = height
       rowHeight = Math.max(rowHeight, height)
 
@@ -130,7 +138,7 @@ export class LayoutEngine {
     return this.#result(items, columnCount)
   }
 
-  #calculateColumn(items, actualWidth, gap, columnCount) {
+  #calculateColumn(items, actualWidth, gap, columnCount, containerWidth) {
     const base = Math.floor(items.length / columnCount)
     const extra = items.length % columnCount
     let column = 0
@@ -146,7 +154,9 @@ export class LayoutEngine {
         columnHeight = 0
       }
 
-      item.x = column * actualWidth + column * gap
+      item.x = column === columnCount - 1
+        ? this.#rightAlignedX(containerWidth, actualWidth)
+        : column * actualWidth + column * gap
       item.y = columnHeight
       item.renderedWidth = actualWidth
       item.renderedHeight = height
@@ -199,6 +209,13 @@ export class LayoutEngine {
 
   #spanWidth(span, actualWidth, gap) {
     return span * actualWidth + (span - 1) * gap
+  }
+
+  #rightAlignedX(containerWidth, width) {
+    const x = containerWidth - width
+    // If subtraction rounded up, keep the reconstructed right edge inside the
+    // container instead of letting its final addition overflow.
+    return x + width > containerWidth ? x - x * Number.EPSILON : x
   }
 
   #result(items, columnCount) {
