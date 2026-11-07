@@ -1,10 +1,10 @@
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const root = resolve(fileURLToPath(new URL('../', import.meta.url)))
+const root = await realpath(fileURLToPath(new URL('../', import.meta.url)))
 const host = process.env.HOST ?? '127.0.0.1'
 const port = Number.parseInt(process.env.PORT ?? '4173', 10)
 const requestedEntry = process.argv[2] ?? '/demo.html'
@@ -29,23 +29,27 @@ function send(response, status, message) {
 }
 
 async function resolveRequestPath(requestUrl) {
-  const url = new URL(requestUrl ?? '/', `http://${host}:${port}`)
-  let pathname
   try {
-    pathname = decodeURIComponent(url.pathname)
+    const url = new URL(requestUrl ?? '/', 'http://localhost')
+    const pathname = url.pathname === '/' ? entryPath : decodeURIComponent(url.pathname)
+    let candidate = resolve(root, `.${pathname}`)
+    if (!isPublicPath(candidate)) return null
+
+    candidate = await realpath(candidate)
+    if (!isPublicPath(candidate)) return null
+    if ((await stat(candidate)).isDirectory()) {
+      candidate = await realpath(join(candidate, 'index.html'))
+    }
+    if (!isPublicPath(candidate) || !(await stat(candidate)).isFile()) return null
+    return candidate
   } catch {
     return null
   }
-  if (pathname === '/') pathname = entryPath
-  const candidate = resolve(root, `.${pathname}`)
-  const fromRoot = relative(root, candidate)
-  if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) return null
-  try {
-    const info = await stat(candidate)
-    return info.isDirectory() ? join(candidate, 'index.html') : candidate
-  } catch {
-    return null
-  }
+}
+
+function isPublicPath(filePath) {
+  const fromRoot = relative(root, filePath)
+  return !isAbsolute(fromRoot) && !fromRoot.split(sep).some(part => part.startsWith('.'))
 }
 
 const server = createServer(async (request, response) => {
@@ -58,16 +62,31 @@ const server = createServer(async (request, response) => {
     send(response, 404, 'Not found')
     return
   }
-  response.writeHead(200, {
+  const headers = {
     'Content-Type': contentTypes.get(extname(filePath).toLowerCase()) ?? 'application/octet-stream',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
-  })
+  }
   if (request.method === 'HEAD') {
+    response.writeHead(200, headers)
     response.end()
     return
   }
-  createReadStream(filePath).pipe(response)
+  const stream = createReadStream(filePath)
+  stream.on('error', () => {
+    if (response.destroyed) return
+    if (response.headersSent) response.destroy()
+    else send(response, 404, 'Not found')
+  })
+  response.on('close', () => stream.destroy())
+  stream.on('open', () => {
+    if (response.destroyed) {
+      stream.destroy()
+      return
+    }
+    response.writeHead(200, headers)
+    stream.pipe(response)
+  })
 })
 
 server.on('error', error => {
@@ -75,7 +94,7 @@ server.on('error', error => {
   process.exitCode = 1
 })
 server.listen(port, host, () => {
-  console.log(`Masonry demo: http://${host}:${port}${entryPath}`)
+  console.log(`Masonry demo: http://${host}:${server.address().port}${entryPath}`)
 })
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => server.close(() => process.exit()))
