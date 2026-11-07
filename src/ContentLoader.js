@@ -1,3 +1,5 @@
+import { isHTMLElement } from './utils.js'
+
 /**
  * Waits until images, video metadata, and web fonts are ready for measurement.
  */
@@ -24,7 +26,7 @@ export class ContentLoader {
    * @returns {Promise<void>}
    */
   async waitForContent(element) {
-    if (typeof HTMLElement === 'undefined' || !(element instanceof HTMLElement)) {
+    if (!isHTMLElement(element)) {
       throw new TypeError('ContentLoader element must be an HTMLElement')
     }
 
@@ -42,21 +44,15 @@ export class ContentLoader {
       }
 
       const videos = this.#collect(element, 'video')
-      const metadataReady = typeof HTMLMediaElement === 'undefined'
-        ? 1
-        : HTMLMediaElement.HAVE_METADATA
       for (const video of videos) {
-        if (video.readyState < metadataReady) {
+        if (video.readyState < video.HAVE_METADATA && !video.error) {
           pendingMedia.push(this.#waitForEvents(video, ['loadedmetadata', 'error'], signal))
         }
       }
 
-      if (
-        typeof document !== 'undefined'
-        && document.fonts
-        && document.fonts.status !== 'loaded'
-      ) {
-        pendingMedia.push(Promise.resolve(document.fonts.ready).then(() => undefined))
+      const fonts = element.ownerDocument.fonts
+      if (fonts) {
+        pendingMedia.push(Promise.resolve(fonts.ready).then(() => undefined))
       }
 
       if (pendingMedia.length === 0) return
