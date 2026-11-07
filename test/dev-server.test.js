@@ -27,9 +27,11 @@ async function startServer(t, { host = '127.0.0.1', mapHostToLoopback = false } 
     await writeFile(resolver, `
 import dns from 'node:dns'
 const lookup = dns.lookup
-dns.lookup = (hostname, options, callback) => {
-  if (hostname !== process.env.HOST) return lookup(hostname, options, callback)
-  queueMicrotask(() => callback(null, '127.0.0.1', 4))
+dns.lookup = (...args) => {
+  const [hostname, options, callback] = args
+  if (hostname !== process.env.HOST) return lookup(...args)
+  const onLookup = typeof options === 'function' ? options : callback
+  queueMicrotask(() => onLookup(null, '127.0.0.1', 4))
 }
 `)
     args.push('--import', resolver)
