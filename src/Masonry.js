@@ -2,7 +2,7 @@ import { EventBus } from '@shelamkoff/event-bus'
 import { InfiniteScroll } from '@shelamkoff/infinite-scroll'
 import { ContentLoader } from './ContentLoader.js'
 import { LayoutEngine } from './LayoutEngine.js'
-import { debounce } from './utils.js'
+import { debounce, getColumnCount as calculateColumnCount, isHTMLElement } from './utils.js'
 
 const LAYOUT_MODES = new Set(['masonry', 'row', 'column'])
 const DEFAULTS = {
@@ -28,18 +28,25 @@ export class Masonry {
   #layoutEngine = new LayoutEngine()
   #contentLoader
   #infiniteScroll = null
+  #loadGeneration = 0
   #resizeObserver
   #debouncedLayout
   #containerWidth = 0
+  #containerMetrics
   #destroyed = false
   #clickHandler
+  #mediaHandler
   #appendQueue = Promise.resolve()
   #reservedIds = new Set()
   #reservedElements = new Set()
   #ownedWrappers = new Set()
+  #wrapperItems = new WeakMap()
+  #autoSpanWrappers = new WeakSet()
   #animationFrames = new Set()
   #originalHeight
   #originalPosition
+  #originalHeightPriority
+  #originalPositionPriority
   #hadContainerClass
 
   /**
@@ -77,6 +84,8 @@ export class Masonry {
 
     this.#originalHeight = container.style.height
     this.#originalPosition = container.style.position
+    this.#originalHeightPriority = container.style.getPropertyPriority('height')
+    this.#originalPositionPriority = container.style.getPropertyPriority('position')
     this.#hadContainerClass = container.classList.contains('masonry-container')
     container.classList.add('masonry-container')
     container.style.position = 'relative'
@@ -85,52 +94,99 @@ export class Masonry {
       if (!this.#destroyed) this.layout()
     }, 100)
 
-    this.#containerWidth = container.getBoundingClientRect().width
-    this.#resizeObserver = new ResizeObserver(entries => {
-      if (this.#destroyed) return
-      const width = entries[0]?.contentRect.width
-      if (Number.isFinite(width) && Math.abs(width - this.#containerWidth) > 0.5) {
-        this.#containerWidth = width
-        this.#debouncedLayout()
-      }
-    })
-    this.#resizeObserver.observe(container)
-
-    if (this.#options.loadMore) {
-      this.#infiniteScroll = new InfiniteScroll(
-        container,
-        async () => {
-          this.emit('scroll:loadmore')
-          return this.#options.loadMore()
-        },
-        {
-          threshold: this.#options.infiniteScrollThreshold,
-          sentinel: 'masonry-sentinel',
-          onError: error => this.emit('scroll:error', error),
-        },
-      )
-    }
-
-    this.#clickHandler = event => {
-      if (!(event.target instanceof Element)) return
-      const wrapper = event.target.closest('.masonry-item')
-      if (
-        !wrapper
-        || wrapper.parentElement !== this.#container
-        || !this.#ownedWrappers.has(wrapper)
-      ) {
-        return
-      }
-
-      const item = this.#items.find(candidate => candidate.wrapper === wrapper)
-      if (!item) return
-      this.emit('item:click', {
-        item: { ...item.data },
-        index: this.#items.indexOf(item),
-        event,
+    try {
+      this.#containerMetrics = this.#measureContainer()
+      this.#containerWidth = this.#containerMetrics.width
+      this.#resizeObserver = new ResizeObserver(entries => {
+        if (this.#destroyed) return
+        let changed = false
+        for (const entry of entries) {
+          if (entry.target === container) {
+            const metrics = this.#measureContainer()
+            if (Object.keys(metrics).some(key => metrics[key] !== this.#containerMetrics[key])) {
+              this.#containerMetrics = metrics
+              this.#containerWidth = metrics.width
+              changed = true
+            }
+            continue
+          }
+          const item = this.#wrapperItems.get(entry.target)
+          if (!item || !this.#ownedWrappers.has(item.wrapper)) continue
+          if (
+            (item.data.height === undefined && item.wrapper.offsetHeight !== item.renderedHeight)
+            || (this.#autoSpanWrappers.has(item.wrapper) && item.data.colSpan !== this.#detectColSpan(
+              item.data.element, this.#options.columnWidth, this.getColumnCount(),
+            ))
+          ) changed = true
+        }
+        if (changed) this.#debouncedLayout()
       })
+      this.#resizeObserver.observe(container, { box: 'border-box' })
+
+      if (this.#options.loadMore) {
+        this.#infiniteScroll = new InfiniteScroll(
+          container,
+          async () => {
+            const generation = ++this.#loadGeneration
+            this.emit('scroll:loadmore')
+            if (this.#destroyed) return false
+            const previousCount = this.#items.length
+            const shouldContinue = await this.#options.loadMore()
+            await this.#appendQueue
+            if (!this.#destroyed && shouldContinue !== false && this.#items.length > previousCount) {
+              // Reobserve after the dependency has released its in-flight guard.
+              // Only a successful append can rearm it, avoiding empty-loader loops.
+              this.#scheduleFrame(() => {
+                if (generation !== this.#loadGeneration) return
+                this.#infiniteScroll.setLoading(true)
+                this.#infiniteScroll.setLoading(false)
+              })
+            }
+            return shouldContinue
+          },
+          {
+            threshold: this.#options.infiniteScrollThreshold,
+            sentinel: 'masonry-sentinel',
+            onError: error => this.emit('scroll:error', error),
+          },
+        )
+      }
+
+      this.#clickHandler = event => {
+        if (event.target?.nodeType !== 1) return
+        const wrapper = event.target.closest('.masonry-item')
+        if (
+          !wrapper
+          || wrapper.parentElement !== this.#container
+          || !this.#ownedWrappers.has(wrapper)
+        ) {
+          return
+        }
+
+        const item = this.#wrapperItems.get(wrapper)
+        if (!item) return
+        this.emit('item:click', {
+          item: { ...item.data },
+          index: this.#items.indexOf(item),
+          event,
+        })
+      }
+      container.addEventListener('click', this.#clickHandler)
+      this.#mediaHandler = event => {
+        if (event.target?.nodeType !== 1) return
+        const wrapper = event.target.closest('.masonry-item')
+        const item = this.#wrapperItems.get(wrapper)
+        if (!item || !this.#ownedWrappers.has(wrapper) || !this.#autoSpanWrappers.has(wrapper)) return
+        if (item.data.colSpan !== this.#detectColSpan(
+          item.data.element, this.#options.columnWidth, this.getColumnCount(),
+        )) this.#debouncedLayout()
+      }
+      container.addEventListener('load', this.#mediaHandler, true)
+      container.addEventListener('error', this.#mediaHandler, true)
+    } catch (error) {
+      this.destroy()
+      throw error
     }
-    container.addEventListener('click', this.#clickHandler)
   }
 
   on(event, handler) {
@@ -173,8 +229,9 @@ export class Masonry {
   async #doAppend(batch) {
     this.#assertActive()
     if (batch.length === 0) return
+    this.#validateElementPlacement(batch)
 
-    const containerWidth = this.#container.getBoundingClientRect().width
+    const { width: containerWidth } = this.#measureContainer()
     if (!Number.isFinite(containerWidth) || containerWidth <= 0) {
       throw new Error('Masonry container must have a measurable width before appending items')
     }
@@ -186,7 +243,7 @@ export class Masonry {
       transitionEasing,
       fadeInDuration,
     } = this.#options
-    const columnCount = Math.max(1, Math.floor((containerWidth + gap) / (columnWidth + gap)))
+    const columnCount = calculateColumnCount(containerWidth, columnWidth, gap)
     const actualWidth = (containerWidth - (columnCount - 1) * gap) / columnCount
     const created = []
     let committed = false
@@ -201,42 +258,72 @@ export class Masonry {
         wrapper.dataset.masonryId = data.id
         wrapper.dataset.masonryIndex = String(this.#items.length + created.length)
         wrapper.style.visibility = 'hidden'
+        const initialSpan = this.#options.layoutMode === 'column'
+          ? 1
+          : Math.min(data.colSpan ?? 1, columnCount)
+        wrapper.style.width = `${initialSpan * actualWidth + (initialSpan - 1) * gap}px`
+        created.push({ data, wrapper, originParent, originNextSibling })
+        this.#ownedWrappers.add(wrapper)
         wrapper.appendChild(data.element)
         this.#container.appendChild(wrapper)
-        this.#ownedWrappers.add(wrapper)
-        created.push({ data, wrapper, originParent, originNextSibling })
+        this.#assertActive()
+      }
 
-        if (data.height === undefined || data.colSpan === undefined) {
-          await this.#contentLoader.waitForContent(data.element)
-          this.#assertActive()
+      await Promise.all(created.map(({ data }) => {
+        const needsSpan = data.colSpan === undefined
+          && this.#options.autoColSpan
+          && this.#options.layoutMode !== 'column'
+        return data.height === undefined || needsSpan
+          ? this.#contentLoader.waitForContent(data.element)
+          : undefined
+      }))
+      this.#assertActive()
+
+      for (const entry of created) {
+        const { data, wrapper } = entry
+        if (data.element.parentNode !== wrapper || wrapper.parentNode !== this.#container) {
+          throw new Error('Masonry item was moved out of its wrapper while appending')
         }
 
         if (data.colSpan === undefined) {
+          if (this.#options.autoColSpan && this.#options.layoutMode !== 'column') {
+            this.#autoSpanWrappers.add(wrapper)
+          }
           data.colSpan = this.#options.autoColSpan
             ? this.#detectColSpan(data.element, columnWidth, columnCount)
             : 1
         }
 
-        const span = Math.min(data.colSpan, columnCount)
+        const span = this.#options.layoutMode === 'column' ? 1 : Math.min(data.colSpan, columnCount)
         const width = span * actualWidth + (span - 1) * gap
         wrapper.style.width = `${width}px`
 
-        created[created.length - 1].layoutItem = {
+        entry.layoutItem = {
           data,
           wrapper,
           x: 0,
           y: 0,
           renderedWidth: width,
-          renderedHeight: data.height ?? wrapper.offsetHeight,
+          renderedHeight: data.height ?? 0,
         }
       }
 
       const layoutItems = created.map(entry => entry.layoutItem)
-      this.#items.push(...layoutItems)
+      for (const item of layoutItems) {
+        this.#items.push(item)
+        this.#wrapperItems.set(item.wrapper, item)
+      }
       committed = true
 
       this.layout()
-      for (const item of layoutItems) item.wrapper.style.visibility = ''
+      if (this.#destroyed) return
+      for (const item of layoutItems) {
+        if (!this.#ownedWrappers.has(item.wrapper)) continue
+        item.wrapper.style.visibility = ''
+        if (item.data.height === undefined || this.#autoSpanWrappers.has(item.wrapper)) {
+          this.#resizeObserver.observe(item.wrapper, { box: 'border-box' })
+        }
+      }
       this.#scheduleReveal(
         layoutItems,
         transitionDuration,
@@ -244,11 +331,16 @@ export class Masonry {
         fadeInDuration,
       )
     } catch (error) {
+      this.#contentLoader.cancelAll()
       if (committed) {
         const wrappers = new Set(created.map(entry => entry.wrapper))
         this.#items = this.#items.filter(item => !wrappers.has(item.wrapper))
       }
-      for (const entry of created) this.#ownedWrappers.delete(entry.wrapper)
+      for (const entry of created) {
+        this.#ownedWrappers.delete(entry.wrapper)
+        this.#resizeObserver.unobserve(entry.wrapper)
+        this.#wrapperItems.delete(entry.wrapper)
+      }
       this.#rollbackCreated(created)
       this.#reindex()
       throw error
@@ -264,11 +356,13 @@ export class Masonry {
       throw new TypeError('Masonry item id must be a non-empty string')
     }
 
-    const index = this.#items.findIndex(item => item.data.id === id)
+    const index = this.#items.findIndex(item => item.data.id === id.trim())
     if (index === -1) return
     const [item] = this.#items.splice(index, 1)
     this.#ownedWrappers.delete(item.wrapper)
-    item.data.element.remove()
+    this.#resizeObserver.unobserve(item.wrapper)
+    this.#wrapperItems.delete(item.wrapper)
+    if (item.data.element.parentNode === item.wrapper) item.data.element.remove()
     item.wrapper.remove()
     this.#reindex()
     this.layout()
@@ -276,8 +370,17 @@ export class Masonry {
 
   layout() {
     this.#assertActive()
-    this.#containerWidth = this.#container.getBoundingClientRect().width
+    this.#containerMetrics = this.#measureContainer()
+    this.#containerWidth = this.#containerMetrics.width
     if (!Number.isFinite(this.#containerWidth) || this.#containerWidth <= 0) return
+    const columnCount = this.getColumnCount()
+    for (const item of this.#items) {
+      if (this.#autoSpanWrappers.has(item.wrapper)) {
+        item.data.colSpan = this.#detectColSpan(
+          item.data.element, this.#options.columnWidth, columnCount,
+        )
+      }
+    }
 
     const first = this.#layoutEngine.calculate(
       this.#items,
@@ -313,10 +416,10 @@ export class Masonry {
 
     for (const item of result.items) {
       item.wrapper.style.width = `${item.renderedWidth}px`
-      item.wrapper.style.transform = `translate3d(${item.x}px, ${item.y}px, 0)`
+      item.wrapper.style.transform = `translate3d(${item.x + this.#containerMetrics.left}px, ${item.y + this.#containerMetrics.top}px, 0)`
     }
-    this.#container.style.height = `${result.containerHeight}px`
-    this.#infiniteScroll?.updateSentinelPosition(result.containerHeight)
+    this.#container.style.height = `${result.containerHeight + this.#containerMetrics.heightExtra}px`
+    this.#infiniteScroll?.updateSentinelPosition(result.containerHeight + this.#containerMetrics.top)
     this.emit('layout:complete', {
       containerHeight: result.containerHeight,
       columnCount: result.columnCount,
@@ -332,26 +435,27 @@ export class Masonry {
     this.#assertActive()
     if (this.#containerWidth <= 0) return 1
     const { gap, columnWidth } = this.#options
-    return Math.max(1, Math.floor((this.#containerWidth + gap) / (columnWidth + gap)))
+    return calculateColumnCount(this.#containerWidth, columnWidth, gap)
   }
 
   destroy() {
     if (this.#destroyed) return
     this.#destroyed = true
-    this.#resizeObserver.disconnect()
+    this.#resizeObserver?.disconnect()
     this.#infiniteScroll?.destroy()
-    this.#debouncedLayout.cancel()
+    this.#debouncedLayout?.cancel()
     this.#contentLoader.cancelAll()
     this.#container.removeEventListener('click', this.#clickHandler)
+    this.#container.removeEventListener('load', this.#mediaHandler, true)
+    this.#container.removeEventListener('error', this.#mediaHandler, true)
 
     for (const frame of this.#animationFrames) cancelAnimationFrame(frame)
     this.#animationFrames.clear()
 
     for (const item of this.#items) {
-      if (item.wrapper.parentNode === this.#container) {
-        this.#container.insertBefore(item.data.element, item.wrapper)
-      } else {
-        item.data.element.remove()
+      if (item.data.element.parentNode === item.wrapper) {
+        if (item.wrapper.parentNode) item.wrapper.replaceWith(item.data.element)
+        else item.data.element.remove()
       }
       item.wrapper.remove()
     }
@@ -359,8 +463,8 @@ export class Masonry {
 
     this.#items = []
     this.#ownedWrappers.clear()
-    this.#container.style.height = this.#originalHeight
-    this.#container.style.position = this.#originalPosition
+    this.#container.style.setProperty('height', this.#originalHeight, this.#originalHeightPriority)
+    this.#container.style.setProperty('position', this.#originalPosition, this.#originalPositionPriority)
     if (!this.#hadContainerClass) {
       this.#container.classList.remove('masonry-container')
     }
@@ -433,14 +537,14 @@ export class Masonry {
     const elements = new Set()
     const existingIds = new Set(this.#items.map(item => item.data.id))
     const existingElements = new Set(this.#items.map(item => item.data.element))
-    const normalized = items.map((item, index) => {
+    const normalized = Array.from(items, (item, index) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
         throw new TypeError(`Masonry item at index ${index} must be an object`)
       }
       if (typeof item.id !== 'string' || item.id.trim() === '') {
         throw new TypeError(`Masonry item at index ${index} must have a non-empty string id`)
       }
-      if (!(item.element instanceof HTMLElement)) {
+      if (!isHTMLElement(item.element)) {
         throw new TypeError(`Masonry item "${item.id}" element must be an HTMLElement`)
       }
       if (item.height !== undefined && (!Number.isFinite(item.height) || item.height < 0)) {
@@ -466,11 +570,35 @@ export class Masonry {
       return { ...item, id }
     })
 
+    this.#validateElementPlacement(normalized)
     for (const item of normalized) {
       this.#reservedIds.add(item.id)
       this.#reservedElements.add(item.element)
     }
     return normalized
+  }
+
+  #validateElementPlacement(batch) {
+    const elements = new Set([
+      ...this.#items.map(item => item.data.element),
+      ...this.#reservedElements,
+      ...batch.map(item => item.element),
+    ])
+    for (const { element } of batch) {
+      if (element.contains(this.#container)) {
+        throw new TypeError('Masonry items cannot be the container or its ancestors')
+      }
+      if (this.#ownedWrappers.has(element)) {
+        throw new TypeError('Masonry items cannot overlap managed wrappers')
+      }
+    }
+    for (const element of elements) {
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        if (elements.has(parent)) {
+          throw new TypeError('Masonry items cannot contain nested item elements')
+        }
+      }
+    }
   }
 
   #detectColSpan(element, columnWidth, columnCount) {
@@ -486,10 +614,37 @@ export class Masonry {
     return Math.max(1, Math.min(Math.round(maxNaturalWidth / columnWidth), columnCount))
   }
 
+  #measureContainer() {
+    const container = this.#container
+    const style = container.ownerDocument.defaultView.getComputedStyle(container)
+    const pixels = property => Number.parseFloat(style[property]) || 0
+    const left = pixels('paddingLeft')
+    const right = pixels('paddingRight')
+    const top = pixels('paddingTop')
+    const bottom = pixels('paddingBottom')
+    const leftBorder = pixels('borderLeftWidth')
+    const horizontalBorder = leftBorder + pixels('borderRightWidth')
+    const scrollbarWidth = container.offsetWidth > 0
+      ? Math.max(0, container.offsetWidth - container.clientWidth - Math.round(horizontalBorder))
+      : 0
+    const borderBox = style.boxSizing === 'border-box'
+    const cssWidth = Number.parseFloat(style.width)
+    const layoutWidth = container.clientWidth || container.getBoundingClientRect().width
+    const width = layoutWidth > 0
+      ? Number.isFinite(cssWidth)
+        ? cssWidth - (borderBox ? left + right + horizontalBorder : 0) - scrollbarWidth
+        : layoutWidth - left - right
+      : 0
+    return {
+      width: Math.max(0, width),
+      left,
+      top,
+      heightExtra: borderBox ? top + bottom + pixels('borderTopWidth') + pixels('borderBottomWidth') : 0,
+    }
+  }
+
   #scheduleReveal(items, transitionDuration, transitionEasing, fadeInDuration) {
-    const frame = requestAnimationFrame(() => {
-      this.#animationFrames.delete(frame)
-      if (this.#destroyed) return
+    this.#scheduleFrame(() => {
       for (const item of items) {
         if (!this.#ownedWrappers.has(item.wrapper)) continue
         item.wrapper.style.transition = [
@@ -499,12 +654,24 @@ export class Masonry {
         item.wrapper.classList.add('masonry-item--visible')
       }
     })
+  }
+
+  #scheduleFrame(callback) {
+    const frame = requestAnimationFrame(() => {
+      this.#animationFrames.delete(frame)
+      if (!this.#destroyed) callback()
+    })
     this.#animationFrames.add(frame)
   }
 
   #rollbackCreated(created) {
     for (const entry of [...created].reverse()) {
       const { data, wrapper, originParent, originNextSibling } = entry
+      // A caller may have taken ownership of a pending element while media loaded.
+      if (data.element.parentNode !== wrapper) {
+        wrapper.remove()
+        continue
+      }
       data.element.remove()
       wrapper.remove()
       if (originParent) {
