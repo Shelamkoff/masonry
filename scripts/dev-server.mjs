@@ -1,8 +1,9 @@
 import { createReadStream } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { isIP } from 'node:net'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { domainToASCII, fileURLToPath } from 'node:url'
 
 const root = await realpath(fileURLToPath(new URL('../', import.meta.url)))
 const host = process.env.HOST ?? '127.0.0.1'
@@ -52,7 +53,26 @@ function isPublicPath(filePath) {
   return !isAbsolute(fromRoot) && !fromRoot.split(sep).some(part => part.startsWith('.'))
 }
 
+function isAllowedHost(authority) {
+  if (typeof authority !== 'string' || /[\s\\/@?#]/.test(authority)) return false
+  try {
+    const hostname = new URL(`http://${authority}`).hostname.toLowerCase().replace(/\.$/, '')
+    const address = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname
+    return isIP(address) !== 0
+      || hostname === 'localhost'
+      || hostname.endsWith('.localhost')
+      || hostname === domainToASCII(host).toLowerCase().replace(/\.$/, '')
+  } catch {
+    return false
+  }
+}
+
 const server = createServer(async (request, response) => {
+  // A loopback listener still needs Host validation to prevent DNS rebinding.
+  if (!isAllowedHost(request.headers.host)) {
+    send(response, 403, 'Host not allowed')
+    return
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     send(response, 405, 'Method not allowed')
     return

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-async function startServer(t) {
+async function startServer(t, { host = '127.0.0.1', mapHostToLoopback = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'masonry-server-'))
   const root = join(directory, 'public')
   await mkdir(join(root, 'scripts'), { recursive: true })
@@ -21,8 +21,22 @@ async function startServer(t) {
   const { port } = reservation.address()
   await new Promise(resolve => reservation.close(resolve))
 
-  const child = spawn(process.execPath, [join(root, 'scripts/dev-server.mjs')], {
-    env: { ...process.env, HOST: '127.0.0.1', PORT: String(port) },
+  const args = []
+  if (mapHostToLoopback) {
+    const resolver = join(directory, 'resolve-host.mjs')
+    await writeFile(resolver, `
+import dns from 'node:dns'
+const lookup = dns.lookup
+dns.lookup = (hostname, options, callback) => {
+  if (hostname !== process.env.HOST) return lookup(hostname, options, callback)
+  queueMicrotask(() => callback(null, '127.0.0.1', 4))
+}
+`)
+    args.push('--import', resolver)
+  }
+  args.push(join(root, 'scripts/dev-server.mjs'))
+  const child = spawn(process.execPath, args, {
+    env: { ...process.env, HOST: host, PORT: String(port) },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const exited = once(child, 'exit')
@@ -42,9 +56,9 @@ async function startServer(t) {
   return {
     directory,
     root,
-    get(path, method = 'GET') {
+    get(path, method = 'GET', headers = {}) {
       return new Promise((resolve, reject) => {
-        const req = request({ host: '127.0.0.1', port, path, method, agent: false }, response => {
+        const req = request({ host: '127.0.0.1', port, path, method, headers, agent: false }, response => {
           let body = ''
           response.setEncoding('utf8')
           response.on('data', chunk => { body += chunk })
@@ -118,4 +132,49 @@ test('the demo server rejects encoded traversal and malformed percent encoding',
   assert.equal((await server.get('/..%2foutside.txt')).status, 404)
   assert.equal((await server.get('/%E0%A4%A')).status, 404)
   assert.equal((await server.get('/demo.html')).status, 200)
+})
+
+test('the demo server rejects foreign Host names before serving local files', async t => {
+  const server = await startServer(t)
+  for (const host of [
+    'attacker.example',
+    'localhost.attacker.example',
+    '127.0.0.1.attacker.example',
+    'attacker.example@localhost',
+    'localhost/attacker.example',
+  ]) {
+    const response = await server.get('/demo.html', 'GET', { Host: host })
+    assert.equal(response.status, 403, host)
+    assert.doesNotMatch(response.body, /Masonry test/)
+  }
+  assert.equal((await server.get('/demo.html')).status, 200)
+})
+
+test('the demo server accepts localhost names and IPv4 and IPv6 authorities', async t => {
+  const server = await startServer(t)
+  for (const host of [
+    'localhost',
+    'LOCALHOST:4173',
+    'localhost.',
+    'preview.localhost:4173',
+    '127.0.0.1:4173',
+    '[::1]',
+    '[::1]:4173',
+    '192.0.2.10:4173',
+  ]) {
+    assert.equal((await server.get('/demo.html', 'GET', { Host: host })).status, 200, host)
+  }
+})
+
+test('binding the demo server to a wildcard address does not trust arbitrary domains', async t => {
+  const server = await startServer(t, { host: '0.0.0.0' })
+  assert.equal((await server.get('/demo.html', 'GET', { Host: 'attacker.example' })).status, 403)
+  assert.equal((await server.get('/demo.html')).status, 200)
+})
+
+test('the demo server accepts its explicitly configured HOST without trusting sibling domains', async t => {
+  const server = await startServer(t, { host: 'masonry.example', mapHostToLoopback: true })
+  assert.equal((await server.get('/demo.html', 'GET', { Host: 'masonry.example' })).status, 200)
+  assert.equal((await server.get('/demo.html', 'GET', { Host: 'MASONRY.EXAMPLE.:4173' })).status, 200)
+  assert.equal((await server.get('/demo.html', 'GET', { Host: 'other.example' })).status, 403)
 })
